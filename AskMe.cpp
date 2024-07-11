@@ -110,6 +110,7 @@ private:
 	bool is_allow_aq;
 	vector<int> from_ids;
 	map<int, vector<int>> mp_qid_questionNItsThreads_to;
+	map<int, vector<int>> mp_fromqid_relatedthreads;
 public:
 	User() = default;
 	User(string line)
@@ -152,6 +153,10 @@ public:
 	map<int, vector<int>>& Get_mp_qid_thread()
 	{
 		return mp_qid_questionNItsThreads_to;
+	}
+	map<int, vector<int>>& Get_mp_fromqid_relatedthreads()
+	{
+		return mp_fromqid_relatedthreads;
 	}
 	void clear_mp_qid_thread()
 	{
@@ -315,19 +320,22 @@ public:
 	void Login()
 	{
 		Sync();
+		while (true)
+		{
 		pair<string, string> p = Userinteraction::GetUserLoginInfo();
-		if (!mp_username_user.count(p.first))
-		{
-			cout << "\nUsername Not Found\n";
-			return;
+			if (!mp_username_user.count(p.first))
+			{
+				cout << "\nUsername Not Found\n\n";
+				continue;
+			}
+			if (mp_username_user[p.first].GetPassword() == p.second)
+			{
+				cout << "\nWelcome, " << mp_username_user[p.first].GetName() << "!\n\n";
+				current_user = mp_username_user[p.first];
+				return;
+			}
+			cout << "\nPassword is incorrect!\n\n";
 		}
-		if (mp_username_user[p.first].GetPassword() == p.second)
-		{
-			cout << "\nWelcome, " << mp_username_user[p.first].GetName() << "!\n";
-			current_user = mp_username_user[p.first];
-			return;
-		}
-		cout << "\nPassword is incorrect!\n";
 	}
 	void SignUp()
 	{
@@ -380,16 +388,30 @@ public:
 		user.clear_mp_qid_thread();
 		for (auto& pair : mp_questionid_question)
 		{
-			if (pair.second.GetFromUserId() == user.GetID())
+			if (pair.second.GetFromUserId() == user.GetID()) //fill questions from him
 			{
 				user.add_fromids(pair.second.GetId());
 			}
-			if (pair.second.GetToUserId() == user.GetID())
+			if (pair.second.GetToUserId() == user.GetID()) //fill questions to him and all it's threads
 			{
 				if (pair.second.GetParentID() == -1)
 					user.Get_mp_qid_thread()[pair.second.GetId()].push_back(pair.second.GetId());
 				else
 					user.Get_mp_qid_thread()[pair.second.GetParentID()].push_back(pair.second.GetId());
+			}
+		}
+		for (auto& id : user.get_fromids())
+		{
+			if (mp_questionid_question[id].GetParentID() == -1) //this is a parent q , now search for it's threads that has parent id of "id"
+			{
+				user.Get_mp_fromqid_relatedthreads()[id].push_back(mp_questionid_question[id].GetId());
+				for (auto& pair : mp_questionid_question)
+				{
+					if (pair.second.GetParentID() == id)
+					{
+						user.Get_mp_fromqid_relatedthreads()[id].push_back(pair.second.GetId());
+					}
+				}
 			}
 		}
 		is_questionsOfUser_filled = true;
@@ -460,7 +482,7 @@ public:
 
 
 	}
-	void AskQuestion(User& user , UserManager & users_manager)
+	void AskQuestion(User& user, UserManager& users_manager)
 	{
 		Sync(user);
 		string line;
@@ -515,12 +537,34 @@ public:
 			return;
 		if (mp_questionid_question[q_id].GetFromUserId() == user.GetID())
 		{
-			auto it = mp_questionid_question.find(q_id);
-			if (it != mp_questionid_question.end())
-				mp_questionid_question.erase(it);
-			UpdateQuestionFile();
-			FillUserQuestions(user);
-			cout << "\nQuestion Deleted Successfully\n";
+			auto it = mp_questionid_question.find(q_id); //after i found the question ,if it is thread i will continue the below 
+			if (it != mp_questionid_question.end()) // if question is found
+			{
+				if (it->second.GetParentID() != -1) //thread case
+				{ // means it is a thread
+					mp_questionid_question.erase(it);
+					UpdateQuestionFile();
+					FillUserQuestions(user);
+					//cout << "\nThread Question Deleted Successfully\n";
+				}
+				else //parent question case
+				{
+					map<int, vector<int>>& mp = user.Get_mp_fromqid_relatedthreads(); // i need to make a map all parent ids from a specific user and it's related threads
+					for (auto& pair : mp)
+					{
+						for (auto id : pair.second)//vector of ids , i need to find all of it and erase it
+						{
+							it = mp_questionid_question.find(id);
+							if (it != mp_questionid_question.end()) {
+								mp_questionid_question.erase(it);
+								
+							}
+						}
+						UpdateQuestionFile();
+						FillUserQuestions(user);
+					}
+				}
+			}
 		}
 		else {
 			cout << "\nYou don't have authorization to delete this question!\n";
@@ -580,8 +624,8 @@ public:
 				questions_manager.AnswerQuestion(users_manager.GetCurrentUser());
 			else if (choice == 4)
 				questions_manager.DeleteQuestion(users_manager.GetCurrentUser());
-			else if (choice == 5) 
-				questions_manager.AskQuestion(users_manager.GetCurrentUser() , users_manager); //i need somehow to check if user question is asked to exists
+			else if (choice == 5)
+				questions_manager.AskQuestion(users_manager.GetCurrentUser(), users_manager); //i need somehow to check if user question is asked to exists
 			else if (choice == 6)
 				users_manager.ListSystemUsers();
 			else if (choice == 7)
